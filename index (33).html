@@ -1,0 +1,1403 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Comunidade de Oração</title>
+<meta name="robots" content="noindex, nofollow" />
+</head>
+<body style="margin:0;">
+<div id="root"><div style="min-height:100vh;display:flex;align-items:center;justify-content:center;font-family:sans-serif;color:#B7C2DA;background:#050B18;font-size:14px;">Carregando a comunidade…</div></div>
+<div id="pc-error" style="display:none;position:fixed;inset:0;background:#101E3A;color:#E9EEF9;font-family:sans-serif;padding:24px;font-size:13px;white-space:pre-wrap;overflow:auto;"></div>
+<script>
+  window.addEventListener("error", function (e) {
+    var box = document.getElementById("pc-error");
+    box.style.display = "block";
+    box.textContent = "Não consegui carregar a página. Detalhe técnico:\n\n" + (e.message || e);
+  });
+</script>
+
+<script crossorigin src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7/babel.min.js"></script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useRef, useEffect, useCallback } = React;
+
+
+function IconHome({ size = 20, color = "currentColor" }) { return <span style={{ fontSize: size, lineHeight: 1, color }}>🏠</span>; }
+function IconBell({ size = 20, color = "currentColor" }) { return <span style={{ fontSize: size, lineHeight: 1, color }}>🔔</span>; }
+function IconUser({ size = 20, color = "currentColor" }) { return <span style={{ fontSize: size, lineHeight: 1, color }}>👤</span>; }
+function IconMessageCircle({ size = 14, color = "currentColor" }) { return <span style={{ fontSize: size, lineHeight: 1, color }}>💬</span>; }
+function IconFlag({ size = 15, color = "currentColor" }) { return <span style={{ fontSize: size, lineHeight: 1, color }}>🚩</span>; }
+function IconX({ size = 20, color = "currentColor" }) { return <span style={{ fontSize: size, lineHeight: 1, color }}>✕</span>; }
+function IconShieldCheck({ size = 17, color = "currentColor" }) { return <span style={{ fontSize: size, lineHeight: 1, color }}>🛡️</span>; }
+function IconListChecks({ size = 20, color = "currentColor" }) { return <span style={{ fontSize: size, lineHeight: 1, color }}>📋</span>; }
+function IconTrash2({ size = 15, color = "currentColor" }) { return <span style={{ fontSize: size, lineHeight: 1, color }}>🗑️</span>; }
+
+// ---------- Supabase connection ----------
+const SUPABASE_URL = "https://xqtrjkdletubffqmruut.supabase.co";
+const SUPABASE_KEY = "sb_publishable_EjNrqY8rH9KPGKxTbpWOkg_TuX41JzD";
+
+async function sb(path, { method = "GET", body, prefer } = {}) {
+  const headers = {
+    apikey: SUPABASE_KEY,
+    Authorization: `Bearer ${SUPABASE_KEY}`,
+    "Content-Type": "application/json",
+  };
+  if (prefer) headers["Prefer"] = prefer;
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Supabase ${method} ${path} failed: ${res.status} ${text}`);
+  }
+  const text = await res.text();
+  return text ? JSON.parse(text) : null;
+}
+
+// local identity persistence: works on the real deployed site;
+// falls back to in-memory only while previewing inside this chat.
+function safeLocalGet(key) {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+function safeLocalSet(key, value) {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    /* ignore in sandboxed preview */
+  }
+}
+function safeLocalRemove(key) {
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    /* ignore in sandboxed preview */
+  }
+}
+
+function timeAgo(iso) {
+  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (diff < 60) return "agora mesmo";
+  if (diff < 3600) return `há ${Math.max(1, Math.floor(diff / 60))} min`;
+  if (diff < 86400) return `há ${Math.floor(diff / 3600)} horas`;
+  return `há ${Math.floor(diff / 86400)} dias`;
+}
+
+function compressImage(file, maxSize = 320, quality = 0.72) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = () => {
+      img.onload = () => {
+        const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+        const w = Math.round(img.width * scale);
+        const h = Math.round(img.height * scale);
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.onerror = reject;
+      img.src = reader.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+// ---------- design tokens (azul-noite + dourado brilhante) ----------
+const T = {
+  ink: "#0D1B33",      // deep navy — headers, dark surfaces, and dark text-on-gold
+  inkSoft: "#16294D",  // secondary navy panel accents
+  gold: "#F3C74C",     // bright gold accent — primary buttons, active states
+  goldSoft: "#F5DFA0", // pale gold — light text-on-navy, and light avatar backgrounds
+  linen: "#FBF6E7",    // warm off-white — used only for light text/panels on dark surfaces
+  appBg: "#101E3A",    // main content background (the app's dark navy canvas)
+  card: "#182B52",     // card / panel surface, one step lighter than appBg
+  mute: "#D7DCE8",     // neutral light chip background (e.g. anonymous avatar)
+  sage: "#7FD8A3",      // success accent ("você orou"), tuned to read on navy
+  sageSoft: "#173A2E",  // dark green tint background for the "prayed" pill
+  rose: "#F0A6B7",       // warnings/report, lightened for contrast on navy
+  roseSoft: "#3A1E27",   // dark rose tint background for reported items
+  text: "#E9EEF9",      // default light body text on dark surfaces
+  ink70: "#B7C2DA",     // secondary light text
+  ink40: "#7C89A8",     // muted light text (placeholders, timestamps)
+  line: "#28406E",      // subtle border on dark surfaces
+};
+
+function initials(name) {
+  return (name || "?").trim().slice(0, 1).toUpperCase();
+}
+
+const POLL_MS = 4000;
+
+function PrayerCommunity() {
+  const [tab, setTab] = useState("home");
+  const [requests, setRequests] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+  const [draft, setDraft] = useState("");
+  const [anonymous, setAnonymous] = useState(false);
+  const [namesModal, setNamesModal] = useState(null);
+  const [openComments, setOpenComments] = useState(() => new Set());
+  const [commentDraft, setCommentDraft] = useState({});
+  const [notifications, setNotifications] = useState([]);
+  const [toast, setToast] = useState(null);
+  const toastTimer = useRef(null);
+
+  // identity captured once when the person first opens the app (coming from Hubla)
+  const [profileSet, setProfileSet] = useState(false);
+  const [myId, setMyId] = useState(null);
+  const [myName, setMyName] = useState("");
+  const [myPhoto, setMyPhoto] = useState(null);
+  const [myEmail, setMyEmail] = useState("");
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [reportedItems, setReportedItems] = useState([]);
+  const [bootstrapping, setBootstrapping] = useState(true);
+  const [memberQuery, setMemberQuery] = useState("");
+  const [memberResults, setMemberResults] = useState([]);
+  const [iAmBlocked, setIAmBlocked] = useState(false);
+  const [iAmPending, setIAmPending] = useState(false);
+  const [pendingMembers, setPendingMembers] = useState([]);
+  const [allMembers, setAllMembers] = useState([]);
+  const [showMembersList, setShowMembersList] = useState(false);
+
+  function showToast(text) {
+    setToast(text);
+    clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 2600);
+  }
+
+  // ---- bootstrap: restore identity from this browser, if it exists on the server ----
+  useEffect(() => {
+    (async () => {
+      const savedId = safeLocalGet("prayer_user_id");
+      if (savedId) {
+        try {
+          const rows = await sb(`users?id=eq.${savedId}&select=*`);
+          if (rows && rows[0]) {
+            if (rows[0].is_blocked) {
+              setIAmBlocked(true);
+              setBootstrapping(false);
+              return;
+            }
+            setMyId(rows[0].id);
+            setMyName(rows[0].name);
+            setMyPhoto(rows[0].photo_url);
+            setMyEmail(rows[0].email || "");
+            setIsAdmin(!!rows[0].is_admin);
+            if (!rows[0].approved) {
+              setIAmPending(true);
+              setBootstrapping(false);
+              return;
+            }
+            setProfileSet(true);
+          }
+        } catch {
+          /* fall through to onboarding */
+        }
+      }
+      setBootstrapping(false);
+    })();
+  }, []);
+
+  const fetchRequests = useCallback(async () => {
+    try {
+      const rows = await sb(
+        "prayer_requests?is_removed=eq.false&order=created_at.desc&select=id,text,is_anonymous,created_at,author_id,users(name,photo_url),prayer_reactions(user_id,users(name)),comments(id,text,created_at,users(name))"
+      );
+      const mapped = rows.map((r) => ({
+        id: r.id,
+        authorId: r.author_id,
+        authorName: r.users?.name || "Alguém",
+        anonymous: r.is_anonymous,
+        text: r.text,
+        time: timeAgo(r.created_at),
+        prayedBy: (r.prayer_reactions || []).map((p) => p.users?.name).filter(Boolean),
+        comments: (r.comments || []).map((c) => ({ id: c.id, authorName: c.users?.name || "Alguém", text: c.text })),
+      }));
+      setRequests(mapped);
+      setLoadError(null);
+    } catch (e) {
+      setLoadError("Não consegui carregar o feed agora. Tentando de novo em instantes…");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const fetchNotifications = useCallback(async (uid) => {
+    if (!uid) return;
+    try {
+      const rows = await sb(`notifications?user_id=eq.${uid}&order=created_at.desc&select=id,text,created_at`);
+      setNotifications(rows.map((n) => ({ id: n.id, text: n.text, time: timeAgo(n.created_at) })));
+    } catch {
+      /* silent — notifications are non-critical */
+    }
+  }, []);
+
+  const fetchReported = useCallback(async () => {
+    try {
+      const rows = await sb(
+        "reports?resolved=eq.false&select=id,reason,request_id,prayer_requests(id,text,is_anonymous,author_id,users(name))"
+      );
+      setReportedItems(rows.filter((r) => r.prayer_requests));
+    } catch {
+      /* silent */
+    }
+  }, []);
+
+  const fetchSelfStatus = useCallback(async (uid) => {
+    if (!uid) return;
+    try {
+      const rows = await sb(`users?id=eq.${uid}&select=is_blocked,approved`);
+      if (rows && rows[0]) {
+        if (rows[0].is_blocked) setIAmBlocked(true);
+        if (rows[0].approved) {
+          setIAmPending(false);
+          setProfileSet(true);
+        }
+      }
+    } catch {
+      /* silent */
+    }
+  }, []);
+
+  const fetchAllMembers = useCallback(async () => {
+    try {
+      const rows = await sb("users?select=id,name,email,photo_url,is_blocked,created_at&order=created_at.desc");
+      setAllMembers(rows);
+    } catch {
+      showToast("Não consegui carregar a lista de membros agora.");
+    }
+  }, []);
+
+  // ---- polling loop: feed + notifications refresh every few seconds ----
+  useEffect(() => {
+    if (!profileSet) return;
+    fetchRequests();
+    fetchNotifications(myId);
+    fetchSelfStatus(myId);
+    if (isAdmin) { fetchReported(); fetchPending(); }
+    const t = setInterval(() => {
+      fetchRequests();
+      fetchNotifications(myId);
+      fetchSelfStatus(myId);
+      if (isAdmin) { fetchReported(); fetchPending(); }
+    }, POLL_MS);
+    return () => clearInterval(t);
+  }, [profileSet, myId, isAdmin, fetchRequests, fetchNotifications, fetchReported, fetchSelfStatus, fetchPending]);
+
+  // ---- while waiting for approval, keep checking so the screen unlocks on its own ----
+  useEffect(() => {
+    if (!iAmPending || !myId) return;
+    const t = setInterval(() => fetchSelfStatus(myId), POLL_MS);
+    return () => clearInterval(t);
+  }, [iAmPending, myId, fetchSelfStatus]);
+
+  async function completeOnboarding(name, email, photo) {
+    try {
+      const rows = await sb("users", {
+        method: "POST",
+        body: { name, email, photo_url: photo },
+        prefer: "return=representation",
+      });
+      const user = rows[0];
+      safeLocalSet("prayer_user_id", user.id);
+      setMyId(user.id);
+      setMyName(user.name);
+      setMyPhoto(user.photo_url);
+      setMyEmail(user.email || "");
+      setIAmPending(true);
+    } catch (e) {
+      showToast("Não consegui te cadastrar agora. Tente novamente.");
+    }
+  }
+
+  function switchAccount() {
+    safeLocalRemove("prayer_user_id");
+    setProfileSet(false);
+    setMyId(null);
+    setMyName("");
+    setMyPhoto(null);
+    setIsAdmin(false);
+    setRequests([]);
+    setNotifications([]);
+    setTab("home");
+  }
+
+  async function saveProfile(name, email, photo) {
+    try {
+      await sb(`users?id=eq.${myId}`, { method: "PATCH", body: { name, email, photo_url: photo } });
+      setMyName(name);
+      setMyEmail(email);
+      setMyPhoto(photo);
+      setEditingProfile(false);
+      showToast("Perfil atualizado.");
+      fetchRequests();
+    } catch {
+      showToast("Não consegui salvar o perfil agora.");
+    }
+  }
+
+  async function publish() {
+    const text = draft.trim();
+    if (!text) return;
+    try {
+      await sb("prayer_requests", {
+        method: "POST",
+        body: { author_id: myId, text, is_anonymous: anonymous },
+      });
+      setDraft("");
+      setAnonymous(false);
+      setTab("home");
+      showToast("Seu pedido foi publicado.");
+      fetchRequests();
+    } catch {
+      showToast("Não consegui publicar agora. Tente de novo.");
+    }
+  }
+
+  async function togglePray(req) {
+    if (req.prayedBy.includes(myName)) return;
+    // optimistic update so it feels instant
+    setRequests((cur) => cur.map((r) => (r.id === req.id ? { ...r, prayedBy: [...r.prayedBy, myName] } : r)));
+    try {
+      await sb("prayer_reactions?on_conflict=request_id,user_id", {
+        method: "POST",
+        body: { request_id: req.id, user_id: myId, reaction_type: "orei" },
+        prefer: "return=representation,resolution=ignore-duplicates",
+      });
+      if (req.authorId !== myId) {
+        await sb("notifications", {
+          method: "POST",
+          body: { user_id: req.authorId, text: `${myName} orou pelo seu pedido.` },
+        });
+      }
+    } catch {
+      /* the next poll will reconcile if this failed */
+    }
+  }
+
+  function toggleComments(id) {
+    setOpenComments((cur) => {
+      const next = new Set(cur);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  async function sendComment(req) {
+    const text = (commentDraft[req.id] || "").trim();
+    if (!text) return;
+    setCommentDraft((d) => ({ ...d, [req.id]: "" }));
+    try {
+      await sb("comments", { method: "POST", body: { request_id: req.id, author_id: myId, text } });
+      if (req.authorId !== myId) {
+        await sb("notifications", {
+          method: "POST",
+          body: { user_id: req.authorId, text: `${myName} comentou no seu pedido.` },
+        });
+      }
+      fetchRequests();
+    } catch {
+      showToast("Não consegui enviar o comentário.");
+    }
+  }
+
+  async function report(req) {
+    try {
+      await sb("reports", { method: "POST", body: { reporter_id: myId, request_id: req.id } });
+      showToast("Obrigado. A administração vai revisar este conteúdo.");
+    } catch {
+      showToast("Não consegui registrar a denúncia agora.");
+    }
+  }
+
+  async function removeRequest(id) {
+    try {
+      await sb(`prayer_requests?id=eq.${id}`, { method: "PATCH", body: { is_removed: true } });
+      await sb(`reports?request_id=eq.${id}&resolved=eq.false`, { method: "PATCH", body: { resolved: true } });
+      fetchRequests();
+      fetchReported();
+    } catch {
+      showToast("Não consegui remover agora.");
+    }
+  }
+
+  async function setUserBlocked(userId, blocked) {
+    try {
+      await sb(`users?id=eq.${userId}`, { method: "PATCH", body: { is_blocked: blocked } });
+      showToast(blocked ? "Membro bloqueado." : "Membro desbloqueado.");
+      fetchReported();
+      setMemberResults((cur) => cur.map((u) => (u.id === userId ? { ...u, is_blocked: blocked } : u)));
+    } catch {
+      showToast("Não consegui atualizar esse membro agora.");
+    }
+  }
+
+  const fetchPending = useCallback(async () => {
+    try {
+      const rows = await sb("users?approved=eq.false&is_blocked=eq.false&order=created_at.asc&select=id,name,email,photo_url,created_at");
+      setPendingMembers(rows);
+    } catch {
+      /* silent */
+    }
+  }, []);
+
+  async function approveMember(userId) {
+    try {
+      await sb(`users?id=eq.${userId}`, { method: "PATCH", body: { approved: true } });
+      showToast("Membro aprovado.");
+      setPendingMembers((cur) => cur.filter((u) => u.id !== userId));
+    } catch {
+      showToast("Não consegui aprovar agora.");
+    }
+  }
+
+  async function rejectMember(userId) {
+    try {
+      await sb(`users?id=eq.${userId}`, { method: "PATCH", body: { is_blocked: true } });
+      showToast("Cadastro recusado.");
+      setPendingMembers((cur) => cur.filter((u) => u.id !== userId));
+    } catch {
+      showToast("Não consegui recusar agora.");
+    }
+  }
+
+  async function searchMembers() {
+    const q = memberQuery.trim();
+    if (!q) {
+      setMemberResults([]);
+      return;
+    }
+    try {
+      const rows = await sb(`users?name=ilike.*${encodeURIComponent(q)}*&select=id,name,email,photo_url,is_blocked&limit=10`);
+      setMemberResults(rows);
+    } catch {
+      showToast("Não consegui buscar membros agora.");
+    }
+  }
+
+  const myRequests = requests.filter((r) => r.authorId === myId);
+  const prayedCount = requests.filter((r) => r.prayedBy.includes(myName)).length;
+
+  if (iAmBlocked) {
+    return (
+      <div style={{ minHeight: "100vh", background: T.ink, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+        <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 22, padding: "34px 26px", maxWidth: 360, textAlign: "center", fontFamily: "'Inter', sans-serif" }}>
+          <p style={{ fontSize: 30, margin: "0 0 10px" }}>🕊️</p>
+          <p style={{ fontSize: 14.5, color: T.ink70, lineHeight: 1.55 }}>
+            Seu acesso a esta comunidade foi encerrado pela administração.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (iAmPending) {
+    return (
+      <div style={{ minHeight: "100vh", background: T.ink, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+        <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 22, padding: "34px 26px", maxWidth: 360, textAlign: "center", fontFamily: "'Inter', sans-serif" }}>
+          <p style={{ fontSize: 30, margin: "0 0 10px" }}>🕊️</p>
+          <h1 style={{ fontFamily: "'Fraunces', serif", fontSize: 19, margin: "0 0 10px", color: T.text }}>
+            Cadastro <span style={{ color: T.gold, fontStyle: "italic", fontWeight: 700 }}>recebido</span>
+          </h1>
+          <p style={{ fontSize: 14, color: T.ink70, lineHeight: 1.55 }}>
+            Estamos confirmando sua assinatura. Assim que for aprovado, esta página libera sozinha o acesso — não precisa fazer nada.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (bootstrapping) {
+    return (
+      <div style={{ minHeight: "100vh", background: T.ink, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <span style={{ color: T.goldSoft, fontFamily: "Inter, sans-serif", fontSize: 14 }}>Carregando…</span>
+      </div>
+    );
+  }
+
+  if (!profileSet) {
+    return <Onboarding onDone={completeOnboarding} />;
+  }
+
+  return (
+    <div style={{ background: "#050B18", minHeight: "100vh", padding: "0" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,600;1,9..144,700&family=Inter:wght@400;500;600;700&display=swap');
+        * { box-sizing: border-box; }
+        .pc-root { font-family: 'Inter', sans-serif; color: ${T.text}; }
+        .pc-serif { font-family: 'Fraunces', serif; }
+        .pc-scroll::-webkit-scrollbar { display: none; }
+        .pc-btn-pray { transition: transform .15s ease, background .2s ease, color .2s ease, box-shadow .2s ease; }
+        .pc-btn-pray:active { transform: scale(0.96); }
+        .pc-btn-pray.active:hover { box-shadow: 0 4px 14px rgba(227,167,59,0.45); }
+        .pc-tab { transition: color .15s ease, transform .15s ease; }
+        .pc-tab:active { transform: scale(0.94); }
+        .pc-card { animation: pcRise .35s ease both; }
+        @keyframes pcRise { from { opacity: 0; transform: translateY(6px);} to { opacity: 1; transform: translateY(0);} }
+        textarea::placeholder, input::placeholder { color: ${T.ink40}; }
+        .pc-link { cursor: pointer; }
+        .pc-toast { animation: pcToast .25s ease both; }
+        @keyframes pcToast { from { opacity:0; transform: translate(-50%, 8px);} to { opacity:1; transform: translate(-50%,0);} }
+      `}</style>
+
+      <div
+        className="pc-root"
+        style={{
+          maxWidth: 460,
+          margin: "0 auto",
+          minHeight: "100vh",
+          background: T.appBg,
+          display: "flex",
+          flexDirection: "column",
+          boxShadow: "0 0 60px rgba(0,0,0,0.55)",
+          position: "relative",
+        }}
+      >
+        {/* Header */}
+        <div
+          style={{
+            background: T.ink,
+            color: T.linen,
+            padding: "22px 20px 20px",
+            position: "sticky",
+            top: 0,
+            zIndex: 5,
+            borderBottom: `1px solid ${T.inkSoft}`,
+          }}
+        >
+          {tab === "home" && (
+            <>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 20 }}>🕊️</span>
+                <h1 className="pc-serif" style={{ margin: 0, fontSize: 22, fontWeight: 600, letterSpacing: 0.2 }}>
+                  Comunidade de <span style={{ color: T.gold, fontStyle: "italic", fontWeight: 700 }}>Oração</span>
+                </h1>
+              </div>
+              <p style={{ margin: "8px 0 0", fontSize: 13.5, color: T.goldSoft, lineHeight: 1.5, maxWidth: 340 }}>
+                Um lugar para pedir oração, orar por outras pessoas e caminhar juntos na fé.
+              </p>
+            </>
+          )}
+          {tab === "mine" && <h1 className="pc-serif" style={{ margin: 0, fontSize: 20 }}>Meus pedidos</h1>}
+          {tab === "notifications" && <h1 className="pc-serif" style={{ margin: 0, fontSize: 20 }}>Notificações</h1>}
+          {tab === "profile" && <h1 className="pc-serif" style={{ margin: 0, fontSize: 20 }}>Perfil</h1>}
+        </div>
+
+        {/* Main content */}
+        <div className="pc-scroll" style={{ flex: 1, overflowY: "auto", padding: "18px 16px 100px" }}>
+          {loadError && (
+            <p style={{ fontSize: 12.5, color: T.rose, textAlign: "center", marginBottom: 10 }}>{loadError}</p>
+          )}
+
+          {tab === "home" && (
+            <>
+              {/* Composer */}
+              <div
+                style={{
+                  background: T.card,
+                  borderRadius: 18,
+                  padding: 16,
+                  border: `1px solid ${T.line}`,
+                  boxShadow: "0 2px 10px rgba(27,36,48,0.05)",
+                  marginBottom: 22,
+                }}
+              >
+                <p style={{ margin: "0 0 10px", fontWeight: 600, fontSize: 14.5 }}>Qual é o seu pedido de oração?</p>
+                <textarea
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  placeholder="Escreva aqui seu pedido de oração…"
+                  rows={3}
+                  style={{
+                    width: "100%",
+                    resize: "none",
+                    border: `1px solid ${T.line}`,
+                    borderRadius: 12,
+                    padding: 12,
+                    fontSize: 14.5,
+                    fontFamily: "inherit",
+                    outline: "none",
+                    background: T.appBg,
+                    color: T.text,
+                  }}
+                  onFocus={(e) => (e.target.style.borderColor = T.gold)}
+                  onBlur={(e) => (e.target.style.borderColor = T.line)}
+                />
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 12 }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13, color: T.ink70, cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      checked={anonymous}
+                      onChange={(e) => setAnonymous(e.target.checked)}
+                      style={{ accentColor: T.gold, width: 15, height: 15 }}
+                    />
+                    Publicar anonimamente
+                  </label>
+                </div>
+                <button
+                  onClick={publish}
+                  disabled={!draft.trim()}
+                  style={{
+                    marginTop: 12,
+                    width: "100%",
+                    background: draft.trim() ? T.gold : T.line,
+                    color: draft.trim() ? T.ink : T.ink40,
+                    border: "none",
+                    borderRadius: 12,
+                    padding: "12px 0",
+                    fontSize: 14.5,
+                    fontWeight: 700,
+                    cursor: draft.trim() ? "pointer" : "not-allowed",
+                    letterSpacing: 0.2,
+                    boxShadow: draft.trim() ? "0 8px 22px rgba(243,199,76,0.35)" : "none",
+                    transition: "box-shadow .2s ease",
+                  }}
+                >
+                  Publicar pedido
+                </button>
+              </div>
+
+              {loading && <p style={{ textAlign: "center", color: T.ink40, fontSize: 13 }}>Carregando pedidos…</p>}
+
+              {!loading && requests.length === 0 && (
+                <p style={{ textAlign: "center", color: T.ink40, fontSize: 14, marginTop: 40 }}>
+                  Ainda não há pedidos. Seja o primeiro a compartilhar.
+                </p>
+              )}
+
+              {requests.map((r) => (
+                <RequestCard
+                  key={r.id}
+                  r={r}
+                  onPray={() => togglePray(r)}
+                  onShowNames={() => setNamesModal(r.id)}
+                  onToggleComments={() => toggleComments(r.id)}
+                  commentsOpen={openComments.has(r.id)}
+                  commentDraft={commentDraft[r.id] || ""}
+                  onCommentChange={(v) => setCommentDraft((d) => ({ ...d, [r.id]: v }))}
+                  onSendComment={() => sendComment(r)}
+                  onReport={() => report(r)}
+                  myName={myName}
+                  myPhoto={myPhoto}
+                  myId={myId}
+                  isAdmin={isAdmin}
+                  onRemove={() => removeRequest(r.id)}
+                />
+              ))}
+            </>
+          )}
+
+          {tab === "mine" && (
+            <>
+              {myRequests.length === 0 ? (
+                <div style={{ textAlign: "center", marginTop: 50, color: T.ink70 }}>
+                  <p style={{ fontSize: 34, margin: 0 }}>🙏</p>
+                  <p style={{ fontSize: 14.5, marginTop: 10 }}>
+                    Você ainda não publicou nenhum pedido.
+                    <br />
+                    Volte ao início e compartilhe o que está em seu coração.
+                  </p>
+                </div>
+              ) : (
+                myRequests.map((r) => (
+                  <RequestCard
+                    key={r.id}
+                    r={r}
+                    onPray={() => togglePray(r)}
+                    onShowNames={() => setNamesModal(r.id)}
+                    onToggleComments={() => toggleComments(r.id)}
+                    commentsOpen={openComments.has(r.id)}
+                    commentDraft={commentDraft[r.id] || ""}
+                    onCommentChange={(v) => setCommentDraft((d) => ({ ...d, [r.id]: v }))}
+                    onSendComment={() => sendComment(r)}
+                    onReport={() => report(r)}
+                    mine
+                    myName={myName}
+                    myPhoto={myPhoto}
+                    myId={myId}
+                    isAdmin={isAdmin}
+                    onRemove={() => removeRequest(r.id)}
+                  />
+                ))
+              )}
+            </>
+          )}
+
+          {tab === "notifications" && (
+            <>
+              {notifications.length === 0 ? (
+                <p style={{ textAlign: "center", color: T.ink40, marginTop: 40, fontSize: 14 }}>
+                  Nenhuma notificação por enquanto.
+                </p>
+              ) : (
+                notifications.map((n) => (
+                  <div
+                    key={n.id}
+                    style={{
+                      background: T.card,
+                      border: `1px solid ${T.line}`,
+                      borderRadius: 14,
+                      padding: "13px 14px",
+                      marginBottom: 10,
+                      display: "flex",
+                      gap: 10,
+                      alignItems: "flex-start",
+                    }}
+                  >
+                    <span style={{ fontSize: 17 }}>🙏</span>
+                    <div>
+                      <p style={{ margin: 0, fontSize: 14 }}>{n.text}</p>
+                      <span style={{ fontSize: 12, color: T.ink40 }}>{n.time}</span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </>
+          )}
+
+          {tab === "profile" && (
+            <>
+              <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 14 }}>
+                <Avatar name={myName} photo={myPhoto} size={60} fontSize={22} />
+                <div style={{ flex: 1 }}>
+                  <p className="pc-serif" style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>{myName}</p>
+                  <p style={{ margin: "2px 0 0", fontSize: 13, color: T.ink70 }}>Membro da comunidade</p>
+                </div>
+                <span
+                  className="pc-link"
+                  onClick={() => setEditingProfile((v) => !v)}
+                  style={{ fontSize: 12.5, color: T.ink70, textDecoration: "underline" }}
+                >
+                  {editingProfile ? "fechar" : "editar"}
+                </span>
+              </div>
+
+              {editingProfile && <ProfileEditor name={myName} email={myEmail} photo={myPhoto} onSave={saveProfile} />}
+
+              <div style={{ display: "flex", gap: 10, marginBottom: 22, marginTop: 4 }}>
+                <StatCard label="Pedidos publicados" value={myRequests.length} />
+                <StatCard label="Vezes que orei" value={prayedCount} />
+              </div>
+
+              {isAdmin && (
+                <div
+                  style={{
+                    background: T.sageSoft,
+                    border: `1px solid ${T.sage}`,
+                    borderRadius: 14,
+                    padding: "12px 14px",
+                    marginBottom: 18,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                  }}
+                >
+                  <IconShieldCheck size={17} color={T.sage} />
+                  <span style={{ fontSize: 13.5, color: T.sage, fontWeight: 600 }}>Você é administrador(a)</span>
+                </div>
+              )}
+
+              {isAdmin && (
+                <div style={{ marginBottom: 18 }}>
+                  <p style={{ fontWeight: 600, fontSize: 14, margin: "0 0 10px" }}>Bloquear um membro</p>
+                  <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                    <input
+                      value={memberQuery}
+                      onChange={(e) => setMemberQuery(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && searchMembers()}
+                      placeholder="Buscar pelo nome…"
+                      style={{ flex: 1, border: `1px solid ${T.line}`, borderRadius: 10, padding: "9px 12px", fontSize: 13.5, outline: "none", fontFamily: "inherit", background: T.appBg, color: T.text }}
+                    />
+                    <button
+                      onClick={searchMembers}
+                      style={{ border: "none", background: T.ink, color: T.goldSoft, borderRadius: 10, padding: "0 16px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}
+                    >
+                      Buscar
+                    </button>
+                  </div>
+                  {memberResults.map((u) => (
+                    <div
+                      key={u.id}
+                      style={{ display: "flex", alignItems: "center", gap: 10, background: T.card, border: `1px solid ${T.line}`, borderRadius: 12, padding: "10px 12px", marginBottom: 8 }}
+                    >
+                      <Avatar name={u.name} photo={u.photo_url} size={32} fontSize={13} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{ margin: 0, fontSize: 13.5 }}>{u.name}</p>
+                        {u.email && <p style={{ margin: 0, fontSize: 11.5, color: T.ink40, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.email}</p>}
+                      </div>
+                      {u.is_blocked ? (
+                        <button
+                          onClick={() => setUserBlocked(u.id, false)}
+                          style={{ background: T.sageSoft, color: T.sage, border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+                        >
+                          Desbloquear
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => setUserBlocked(u.id, true)}
+                          style={{ background: "transparent", color: T.rose, border: `1px solid ${T.rose}`, borderRadius: 8, padding: "6px 12px", fontSize: 12, cursor: "pointer" }}
+                        >
+                          Bloquear
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {isAdmin && (
+                <div style={{ marginBottom: 18 }}>
+                  <p style={{ fontWeight: 600, fontSize: 14, margin: "0 0 4px" }}>
+                    Pendentes de aprovação {pendingMembers.length > 0 && `(${pendingMembers.length})`}
+                  </p>
+                  <p style={{ fontSize: 12, color: T.ink40, margin: "0 0 10px" }}>
+                    Confira o e-mail na Hubla antes de aprovar.
+                  </p>
+                  {pendingMembers.length === 0 ? (
+                    <p style={{ fontSize: 13, color: T.ink40 }}>Ninguém esperando aprovação no momento.</p>
+                  ) : (
+                    pendingMembers.map((u) => (
+                      <div
+                        key={u.id}
+                        style={{ background: T.card, border: `1px solid ${T.gold}`, borderRadius: 12, padding: "10px 12px", marginBottom: 8 }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                          <Avatar name={u.name} photo={u.photo_url} size={32} fontSize={13} />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <p style={{ margin: 0, fontSize: 13.5 }}>{u.name}</p>
+                            <p style={{ margin: 0, fontSize: 11.5, color: T.ink40, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {u.email || "sem e-mail"}
+                            </p>
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button
+                            onClick={() => approveMember(u.id)}
+                            style={{ flex: 1, background: T.gold, color: T.ink, border: "none", borderRadius: 8, padding: "7px 0", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}
+                          >
+                            Aprovar
+                          </button>
+                          <button
+                            onClick={() => rejectMember(u.id)}
+                            style={{ flex: 1, background: "transparent", color: T.rose, border: `1px solid ${T.rose}`, borderRadius: 8, padding: "7px 0", fontSize: 12.5, cursor: "pointer" }}
+                          >
+                            Recusar
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+
+              {isAdmin && (
+                <div style={{ marginBottom: 18 }}>
+                  <div
+                    className="pc-link"
+                    onClick={() => {
+                      const next = !showMembersList;
+                      setShowMembersList(next);
+                      if (next) fetchAllMembers();
+                    }}
+                    style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: showMembersList ? 10 : 0 }}
+                  >
+                    <p style={{ fontWeight: 600, fontSize: 14, margin: 0 }}>Ver todos os membros e e-mails</p>
+                    <span style={{ fontSize: 12.5, color: T.ink40, textDecoration: "underline" }}>{showMembersList ? "fechar" : "abrir"}</span>
+                  </div>
+                  <p style={{ fontSize: 12, color: T.ink40, margin: showMembersList ? "0 0 10px" : 0 }}>
+                    Use essa lista para comparar com os e-mails de quem pagou lá na Hubla.
+                  </p>
+                  {showMembersList &&
+                    allMembers.map((u) => (
+                      <div
+                        key={u.id}
+                        style={{ display: "flex", alignItems: "center", gap: 10, background: T.card, border: `1px solid ${T.line}`, borderRadius: 12, padding: "10px 12px", marginBottom: 8 }}
+                      >
+                        <Avatar name={u.name} photo={u.photo_url} size={32} fontSize={13} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <p style={{ margin: 0, fontSize: 13.5 }}>
+                            {u.name} {u.is_blocked && <span style={{ color: T.rose, fontSize: 11 }}>(bloqueado)</span>}
+                          </p>
+                          <p style={{ margin: 0, fontSize: 11.5, color: T.ink40, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {u.email || "sem e-mail cadastrado"}
+                          </p>
+                        </div>
+                        {u.is_blocked ? (
+                          <button
+                            onClick={() => setUserBlocked(u.id, false)}
+                            style={{ background: T.sageSoft, color: T.sage, border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+                          >
+                            Desbloquear
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => setUserBlocked(u.id, true)}
+                            style={{ background: "transparent", color: T.rose, border: `1px solid ${T.rose}`, borderRadius: 8, padding: "6px 12px", fontSize: 12, cursor: "pointer" }}
+                          >
+                            Bloquear
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                </div>
+              )}
+
+              {isAdmin && (
+                <div style={{ marginBottom: 10 }}>
+                  <p style={{ fontWeight: 600, fontSize: 14, margin: "0 0 10px" }}>
+                    Conteúdo denunciado ({reportedItems.length})
+                  </p>
+                  {reportedItems.length === 0 ? (
+                    <p style={{ fontSize: 13, color: T.ink40 }}>Nenhuma denúncia no momento.</p>
+                  ) : (
+                    reportedItems.map((item) => (
+                      <div
+                        key={item.id}
+                        style={{
+                          background: T.roseSoft,
+                          border: `1px solid ${T.rose}`,
+                          borderRadius: 12,
+                          padding: 12,
+                          marginBottom: 10,
+                        }}
+                      >
+                        <p style={{ fontSize: 13, margin: "0 0 8px" }}>
+                          <strong>
+                            {item.prayer_requests.is_anonymous ? "Pedido anônimo" : item.prayer_requests.users?.name}:
+                          </strong>{" "}
+                          {item.prayer_requests.text}
+                        </p>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button
+                            onClick={() => removeRequest(item.prayer_requests.id)}
+                            style={{ background: T.ink, color: T.linen, border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 12.5, cursor: "pointer" }}
+                          >
+                            Remover conteúdo
+                          </button>
+                          <button
+                            onClick={() => setUserBlocked(item.prayer_requests.author_id, true)}
+                            style={{ background: "transparent", color: T.rose, border: `1px solid ${T.rose}`, borderRadius: 8, padding: "6px 12px", fontSize: 12.5, cursor: "pointer" }}
+                          >
+                            Bloquear autor
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+
+              <p
+                className="pc-link"
+                onClick={() => {
+                  if (window.confirm("Sair desta conta neste aparelho? Da próxima vez vai pedir o nome de novo.")) {
+                    switchAccount();
+                  }
+                }}
+                style={{ fontSize: 12.5, color: T.ink40, textAlign: "center", marginTop: 24, textDecoration: "underline" }}
+              >
+                Sair / trocar de conta neste aparelho
+              </p>
+            </>
+          )}
+        </div>
+
+        {/* Bottom nav */}
+        <div
+          style={{
+            position: "sticky",
+            bottom: 0,
+            background: T.card,
+            borderTop: `1px solid ${T.line}`,
+            display: "flex",
+            justifyContent: "space-around",
+            padding: "10px 0 12px",
+          }}
+        >
+          <TabButton icon={IconHome} label="Início" active={tab === "home"} onClick={() => setTab("home")} />
+          <TabButton icon={IconListChecks} label="Meus pedidos" active={tab === "mine"} onClick={() => setTab("mine")} />
+          <TabButton
+            icon={IconBell}
+            label="Notificações"
+            active={tab === "notifications"}
+            onClick={() => setTab("notifications")}
+            badge={notifications.length}
+          />
+          <TabButton icon={IconUser} label="Perfil" active={tab === "profile"} onClick={() => setTab("profile")} />
+        </div>
+
+        {/* Names modal */}
+        {namesModal !== null && (
+          <NamesModal request={requests.find((r) => r.id === namesModal)} onClose={() => setNamesModal(null)} />
+        )}
+
+        {/* Toast */}
+        {toast && (
+          <div
+            className="pc-toast"
+            style={{
+              position: "absolute",
+              bottom: 78,
+              left: "50%",
+              transform: "translateX(-50%)",
+              background: T.ink,
+              color: T.goldSoft,
+              padding: "10px 16px",
+              borderRadius: 20,
+              fontSize: 13,
+              boxShadow: "0 6px 18px rgba(0,0,0,0.25)",
+              whiteSpace: "nowrap",
+              zIndex: 20,
+            }}
+          >
+            {toast}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TabButton({ icon: Icon, label, active, onClick, badge }) {
+  return (
+    <button
+      className="pc-tab"
+      onClick={onClick}
+      style={{
+        background: "none",
+        border: "none",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: 3,
+        cursor: "pointer",
+        color: active ? T.gold : T.ink40,
+        position: "relative",
+        padding: "2px 6px",
+      }}
+    >
+      <Icon size={20} strokeWidth={active ? 2.4 : 1.9} color={active ? T.gold : T.ink40} />
+      <span style={{ fontSize: 10.5, fontWeight: active ? 600 : 500 }}>{label}</span>
+      {!!badge && (
+        <span
+          style={{
+            position: "absolute",
+            top: -2,
+            right: -6,
+            background: T.rose,
+            color: "#fff",
+            fontSize: 9,
+            borderRadius: 8,
+            padding: "1px 5px",
+            fontWeight: 700,
+          }}
+        >
+          {badge}
+        </span>
+      )}
+    </button>
+  );
+}
+
+function StatCard({ label, value }) {
+  return (
+    <div style={{ flex: 1, background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: "14px 12px", textAlign: "center" }}>
+      <p className="pc-serif" style={{ margin: 0, fontSize: 24, fontWeight: 600, color: T.text }}>{value}</p>
+      <p style={{ margin: "4px 0 0", fontSize: 11.5, color: T.ink70 }}>{label}</p>
+    </div>
+  );
+}
+
+function RequestCard({ r, onPray, onShowNames, onToggleComments, commentsOpen, commentDraft, onCommentChange, onSendComment, onReport, mine, myName, myPhoto, myId, isAdmin, onRemove }) {
+  const hasPrayed = r.prayedBy.includes(myName);
+  const displayName = r.anonymous ? "Pedido anônimo" : r.authorName;
+  const showPhoto = !r.anonymous && r.authorId === myId ? myPhoto : null;
+
+  return (
+    <div
+      className="pc-card"
+      style={{ background: T.card, borderRadius: 18, padding: 16, marginBottom: 14, border: `1px solid ${T.line}`, boxShadow: "0 2px 10px rgba(27,36,48,0.05)" }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+        {showPhoto ? (
+          <Avatar photo={showPhoto} name={r.authorName} size={36} fontSize={14} />
+        ) : (
+          <div
+            style={{
+              width: 36, height: 36, borderRadius: "50%",
+              background: r.anonymous ? T.mute : T.goldSoft,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontFamily: "'Fraunces', serif", fontWeight: 600, color: T.ink, fontSize: 14,
+            }}
+          >
+            {r.anonymous ? "?" : initials(r.authorName)}
+          </div>
+        )}
+        <div style={{ flex: 1 }}>
+          <p style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>
+            {displayName} {mine && <span style={{ color: T.ink40, fontWeight: 500 }}>(você)</span>}
+          </p>
+          <span style={{ fontSize: 11.5, color: T.ink40 }}>{r.time}</span>
+        </div>
+        <span className="pc-link" onClick={onReport} title="Denunciar" style={{ color: T.ink40, display: "flex", alignItems: "center" }}>
+          <IconFlag size={15} />
+        </span>
+        {isAdmin && (
+          <span
+            className="pc-link"
+            onClick={() => {
+              if (window.confirm("Remover este pedido para todos?")) onRemove();
+            }}
+            title="Excluir (admin)"
+            style={{ color: T.rose, display: "flex", alignItems: "center", marginLeft: 10 }}
+          >
+            <IconTrash2 size={15} />
+          </span>
+        )}
+      </div>
+
+      <p style={{ fontSize: 14.5, lineHeight: 1.55, margin: "0 0 14px", color: T.text }}>{r.text}</p>
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <button
+          className={`pc-btn-pray ${hasPrayed ? "" : "active"}`}
+          onClick={onPray}
+          disabled={hasPrayed}
+          style={{
+            border: "none", borderRadius: 22, padding: "9px 18px", fontSize: 13.5, fontWeight: 600,
+            cursor: hasPrayed ? "default" : "pointer",
+            background: hasPrayed ? T.sageSoft : T.gold,
+            color: hasPrayed ? T.sage : T.ink,
+            display: "flex", alignItems: "center", gap: 6,
+          }}
+        >
+          🙏 {hasPrayed ? "Você orou" : "Orei"}
+        </button>
+
+        <span className="pc-link" onClick={onShowNames} style={{ fontSize: 12.5, color: T.ink70, cursor: "pointer", textAlign: "right" }}>
+          <strong style={{ color: T.text }}>{r.prayedBy.length}</strong>{" "}
+          {r.prayedBy.length === 1 ? "pessoa está orando" : "pessoas estão orando"}
+        </span>
+      </div>
+
+      <div style={{ marginTop: 12, borderTop: `1px solid ${T.line}`, paddingTop: 10 }}>
+        <span className="pc-link" onClick={onToggleComments} style={{ fontSize: 12.5, color: T.ink70, display: "flex", alignItems: "center", gap: 5 }}>
+          <IconMessageCircle size={14} />
+          {r.comments.length === 0 ? "Comentar" : `${r.comments.length} coment${r.comments.length === 1 ? "ário" : "ários"}`}
+        </span>
+
+        {commentsOpen && (
+          <div style={{ marginTop: 10 }}>
+            {r.comments.map((c) => (
+              <div key={c.id} style={{ marginBottom: 8, fontSize: 13 }}>
+                <strong>{c.authorName}: </strong>
+                <span style={{ color: T.ink70 }}>{c.text}</span>
+              </div>
+            ))}
+            <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+              <input
+                value={commentDraft}
+                onChange={(e) => onCommentChange(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && onSendComment()}
+                placeholder="Escreva uma palavra de apoio…"
+                style={{ flex: 1, border: `1px solid ${T.line}`, borderRadius: 10, padding: "8px 10px", fontSize: 13, outline: "none", fontFamily: "inherit", background: T.appBg, color: T.text }}
+              />
+              <button
+                onClick={onSendComment}
+                style={{ border: "none", background: T.ink, color: T.goldSoft, borderRadius: 10, padding: "0 14px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}
+              >
+                Enviar
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function NamesModal({ request, onClose }) {
+  if (!request) return null;
+  return (
+    <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(27,36,48,0.55)", display: "flex", alignItems: "flex-end", zIndex: 30 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: T.card, width: "100%", borderRadius: "20px 20px 0 0", padding: "18px 18px 26px", maxHeight: "60%", overflowY: "auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <p className="pc-serif" style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>{request.prayedBy.length} pessoas oraram</p>
+          <span className="pc-link" onClick={onClose}><IconX size={20} color={T.ink70} /></span>
+        </div>
+        {request.prayedBy.length === 0 ? (
+          <p style={{ fontSize: 13.5, color: T.ink40 }}>Ainda ninguém orou por este pedido. Seja o primeiro.</p>
+        ) : (
+          request.prayedBy.map((n, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: `1px solid ${T.line}` }}>
+              <Avatar name={n} size={28} fontSize={12} />
+              <span style={{ fontSize: 13.5 }}>{n}</span>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Avatar({ name, photo, size = 36, fontSize = 14 }) {
+  if (photo) {
+    return <img src={photo} alt={name} style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />;
+  }
+  return (
+    <div style={{ width: size, height: size, borderRadius: "50%", background: T.goldSoft, color: T.ink, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize, fontFamily: "'Fraunces', serif", flexShrink: 0 }}>
+      {name ? initials(name) : "?"}
+    </div>
+  );
+}
+
+// One-time step the person sees the first time they arrive from the Hubla link.
+// No password, no e-mail — just how the community should address them.
+function Onboarding({ onDone }) {
+  const [name, setName] = useState("");
+  const [photo, setPhoto] = useState(null);
+  const [email, setEmail] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function handlePhoto(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const dataUrl = await compressImage(file);
+    setPhoto(dataUrl);
+  }
+
+  const emailValid = /\S+@\S+\.\S+/.test(email.trim());
+  const canSubmit = name.trim() && emailValid && !saving;
+
+  async function handleSubmit() {
+    if (!canSubmit) return;
+    setSaving(true);
+    await onDone(name.trim(), email.trim().toLowerCase(), photo);
+    setSaving(false);
+  }
+
+  return (
+    <div style={{ minHeight: "100vh", background: T.ink, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,600;1,9..144,700&family=Inter:wght@400;500;600;700&display=swap');
+        * { box-sizing: border-box; }
+      `}</style>
+      <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 22, padding: "32px 26px", maxWidth: 380, width: "100%", fontFamily: "'Inter', sans-serif", textAlign: "center" }}>
+        <p style={{ fontSize: 30, margin: "0 0 10px" }}>🕊️</p>
+        <h1 style={{ fontFamily: "'Fraunces', serif", fontSize: 22, margin: "0 0 8px", color: T.text }}>
+          Bem-vindo(a) à Comunidade de <span style={{ color: T.gold, fontStyle: "italic", fontWeight: 700 }}>Oração</span>
+        </h1>
+        <p style={{ fontSize: 13.5, color: T.ink70, margin: "0 0 24px", lineHeight: 1.5 }}>
+          Antes de entrar, nos diga como podemos te chamar e qual e-mail você usou na sua assinatura. Não pedimos senha — isso já foi resolvido quando você entrou pela sua área de membros.
+        </p>
+
+        <label style={{ display: "inline-block", cursor: "pointer", marginBottom: 18 }}>
+          <input type="file" accept="image/*" onChange={handlePhoto} style={{ display: "none" }} />
+          {photo ? (
+            <Avatar photo={photo} name={name} size={78} />
+          ) : (
+            <div style={{ width: 78, height: 78, borderRadius: "50%", background: T.goldSoft, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12.5, color: T.ink, border: `1.5px dashed ${T.gold}`, margin: "0 auto", textAlign: "center", padding: 6, lineHeight: 1.3 }}>
+              Adicionar foto (opcional)
+            </div>
+          )}
+        </label>
+
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Seu nome"
+          style={{ width: "100%", border: `1px solid ${T.line}`, borderRadius: 12, padding: "12px 14px", fontSize: 15, outline: "none", fontFamily: "inherit", background: T.appBg, color: T.text, marginBottom: 10, textAlign: "center" }}
+        />
+
+        <input
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="Seu e-mail (o mesmo da assinatura)"
+          type="email"
+          style={{ width: "100%", border: `1px solid ${T.line}`, borderRadius: 12, padding: "12px 14px", fontSize: 15, outline: "none", fontFamily: "inherit", background: T.appBg, color: T.text, marginBottom: 16, textAlign: "center" }}
+        />
+
+        <button
+          onClick={handleSubmit}
+          disabled={!canSubmit}
+          style={{
+            width: "100%", border: "none", borderRadius: 12, padding: "13px 0", fontSize: 14.5, fontWeight: 700,
+            background: canSubmit ? T.gold : T.line, color: canSubmit ? T.ink : T.ink40,
+            cursor: canSubmit ? "pointer" : "not-allowed",
+            boxShadow: canSubmit ? "0 8px 22px rgba(243,199,76,0.35)" : "none",
+          }}
+        >
+          {saving ? "Entrando…" : "Entrar na comunidade"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ProfileEditor({ name, email, photo, onSave }) {
+  const [localName, setLocalName] = useState(name);
+  const [localEmail, setLocalEmail] = useState(email || "");
+  const [localPhoto, setLocalPhoto] = useState(photo);
+
+  async function handlePhoto(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const dataUrl = await compressImage(file);
+    setLocalPhoto(dataUrl);
+  }
+
+  const canSave = localName.trim() && /\S+@\S+\.\S+/.test(localEmail.trim());
+
+  return (
+    <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, marginBottom: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 12 }}>
+        <label style={{ cursor: "pointer" }}>
+          <input type="file" accept="image/*" onChange={handlePhoto} style={{ display: "none" }} />
+          <Avatar name={localName} photo={localPhoto} size={48} fontSize={16} />
+        </label>
+        <span style={{ fontSize: 12, color: T.ink70 }}>Toque na foto para trocar</span>
+      </div>
+      <input
+        value={localName}
+        onChange={(e) => setLocalName(e.target.value)}
+        placeholder="Seu nome"
+        style={{ width: "100%", border: `1px solid ${T.line}`, borderRadius: 10, padding: "9px 12px", fontSize: 14, outline: "none", fontFamily: "inherit", background: T.appBg, color: T.text, marginBottom: 10 }}
+      />
+      <input
+        value={localEmail}
+        onChange={(e) => setLocalEmail(e.target.value)}
+        placeholder="Seu e-mail"
+        type="email"
+        style={{ width: "100%", border: `1px solid ${T.line}`, borderRadius: 10, padding: "9px 12px", fontSize: 14, outline: "none", fontFamily: "inherit", background: T.appBg, color: T.text, marginBottom: 10 }}
+      />
+      <button
+        onClick={() => canSave && onSave(localName.trim(), localEmail.trim().toLowerCase(), localPhoto)}
+        disabled={!canSave}
+        style={{ border: "none", background: T.ink, color: T.goldSoft, borderRadius: 10, padding: "9px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}
+      >
+        Salvar
+      </button>
+    </div>
+  );
+}
+
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<PrayerCommunity />);
+</script>
+</body>
+</html>
