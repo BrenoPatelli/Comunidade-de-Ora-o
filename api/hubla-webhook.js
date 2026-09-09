@@ -46,26 +46,26 @@ async function sb(path, options = {}) {
 // every likely spot an e-mail address could be hiding.
 function extractEmail(body) {
   const candidates = [
+    body?.event?.subscription?.payer?.email, // confirmed real path for subscription.* events
+    body?.event?.payer?.email,
+    body?.event?.buyer?.email,
+    body?.event?.customer?.email,
+    body?.event?.invoice?.payer?.email,
     body?.email,
     body?.buyer?.email,
     body?.customer?.email,
     body?.payload?.email,
-    body?.payload?.buyer?.email,
-    body?.payload?.customer?.email,
     body?.data?.email,
-    body?.data?.buyer?.email,
-    body?.data?.customer?.email,
-    body?.invoice?.buyer?.email,
-    body?.invoice?.customer?.email,
-    body?.subscription?.buyer?.email,
-    body?.subscription?.customer?.email,
     body?.user?.email,
   ];
   return candidates.find((e) => typeof e === "string" && e.includes("@"));
 }
 
 function extractEventType(body) {
-  return body?.event || body?.type || body?.eventType || body?.name || "";
+  // NOTE: body.type is the real event name (e.g. "subscription.activated").
+  // body.event is a nested OBJECT with all the event's data, not a string —
+  // checking it first (like `body.event || body.type`) would silently break this.
+  return body?.type || body?.eventType || body?.name || "";
 }
 
 export default async function handler(req, res) {
