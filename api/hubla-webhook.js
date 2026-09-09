@@ -13,19 +13,16 @@ const HUBLA_TOKEN = "FEAdxNDqmTI6yN4KHBwX3jxC4UFoJ7KFZadpGCUdsB1FfPYFwCk1FYA4NPK
 
 // Event names that mean "this person paid / subscription is active" -> grant the badge.
 const GRANT_EVENTS = [
-  "invoice.payment_succeeded",
-  "subscription.activated",
   "subscription.created",
-  "sale.created",
+  "subscription.activated",
+  "subscription.renewal_enabled",
+  "invoice.payment_succeeded",
   "sale.approved",
 ];
 
 // Event names that mean "this person stopped paying" -> remove the badge.
 const REVOKE_EVENTS = [
-  "subscription.canceled",
-  "subscription.cancelled",
-  "subscription.suspended",
-  "subscription.expired",
+  "subscription.deactivated",
   "invoice.payment_failed",
   "sale.refunded",
   "sale.chargeback",
