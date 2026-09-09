@@ -81,20 +81,23 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  // Always respond fast — do the real work, but never make Hubla wait or retry.
-  res.status(200).json({ received: true });
-
   try {
     const body = req.body || {};
     const eventType = extractEventType(body);
     const email = extractEmail(body);
 
-    if (!email) return; // nothing we can match without an e-mail
+    if (!email) {
+      res.status(200).json({ received: true, note: "no email found" });
+      return;
+    }
 
     const cleanEmail = email.trim().toLowerCase();
     const found = await sb(`users?email=eq.${encodeURIComponent(cleanEmail)}&select=id,is_supporter&limit=1`);
     const profile = found.data && found.data[0];
-    if (!profile) return; // this person hasn't joined the community app yet
+    if (!profile) {
+      res.status(200).json({ received: true, note: "no matching profile yet" });
+      return;
+    }
 
     if (GRANT_EVENTS.includes(eventType) && !profile.is_supporter) {
       await sb(`users?id=eq.${profile.id}`, {
@@ -107,7 +110,9 @@ module.exports = async function handler(req, res) {
         body: JSON.stringify({ is_supporter: false }),
       });
     }
+
+    res.status(200).json({ received: true });
   } catch (e) {
-    // Swallow errors here — the 200 response was already sent above.
+    res.status(200).json({ received: true, error: String(e) });
   }
-}
+};
